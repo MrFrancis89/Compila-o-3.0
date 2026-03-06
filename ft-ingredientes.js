@@ -174,6 +174,46 @@ export function renderIngredientes(busca = '') {
     b.addEventListener('click', () => abrirFormIngrediente(b.dataset.id)));
 }
 
+// ─── Helpers de formatação/máscara para os inputs do formulário ───
+//
+// _fmtPreco: converte número float para string BR (35.5 → "35,50")
+// _fmtQtd:   converte número float para string BR (2.5 → "2,5"; 1000 → "1000")
+// _moneyMask: aplica máscara monetária enquanto o usuário digita
+//   Digita: 3  5  5  0  →  "0,03" "0,35" "3,55" "35,50"
+//   Assim .value SEMPRE contém vírgula → parseNum() funciona corretamente
+// _qtyMask: normaliza qty (substitui ponto por vírgula, remove duplicatas)
+
+function _fmtPreco(v) {
+  if (v == null || isNaN(v)) return '';
+  return Number(v).toFixed(2).replace('.', ',');
+}
+
+function _fmtQtd(v) {
+  if (v == null || isNaN(v)) return '';
+  // Remove trailing zeros desnecessários: 2.500 → "2,5"; 1000.0 → "1000"
+  const s = Number(v).toString().replace('.', ',');
+  return s;
+}
+
+function _moneyMask(input) {
+  // Extrai apenas dígitos
+  const digits = input.value.replace(/\D/g, '');
+  if (!digits) { input.value = ''; return; }
+  // Divide por 100 para obter o valor em reais
+  const cents = parseInt(digits, 10);
+  const formatted = (cents / 100).toFixed(2).replace('.', ',');
+  input.value = formatted;
+}
+
+function _qtyMask(input) {
+  // Permite apenas dígitos + vírgula + ponto (substitui ponto por vírgula)
+  let v = input.value.replace(/[^\d,.]/g, '').replace('.', ',');
+  // Permite apenas uma vírgula
+  const parts = v.split(',');
+  if (parts.length > 2) v = parts[0] + ',' + parts.slice(1).join('');
+  input.value = v;
+}
+
 // ─── Formulário — completamente reativo à unidade ─────────────────
 export function abrirFormIngrediente(id = null) {
   const ing = id ? getIngredienteById(id) : null;
@@ -219,9 +259,9 @@ export function abrirFormIngrediente(id = null) {
         <div class="ft-field" style="flex:1.2">
           <label id="ft-ing-qtd-lbl" for="ft-ing-qtd">Qtd. da embalagem</label>
           <div class="ft-input-suf-wrap">
-            <input id="ft-ing-qtd" class="ft-input has-suf" type="number"
-              placeholder="1000" value="${ing?.quantidade_embalagem || ''}"
-              min="0.001" step="any" inputmode="decimal">
+            <input id="ft-ing-qtd" class="ft-input has-suf" type="text"
+              placeholder="1000" value="${ing ? _fmtQtd(ing.quantidade_embalagem) : ''}"
+              inputmode="decimal" autocomplete="off">
             <span class="ft-input-suf" id="ft-ing-suf">g</span>
           </div>
         </div>
@@ -229,9 +269,9 @@ export function abrirFormIngrediente(id = null) {
           <label for="ft-ing-preco">Preço de compra</label>
           <div class="ft-input-pre-wrap">
             <span class="ft-input-pre">R$</span>
-            <input id="ft-ing-preco" class="ft-input has-pre" type="number"
-              placeholder="0,00" value="${ing?.preco_compra || ''}"
-              min="0" step="0.01" inputmode="decimal">
+            <input id="ft-ing-preco" class="ft-input has-pre" type="text"
+              placeholder="0,00" value="${ing ? _fmtPreco(ing.preco_compra) : ''}"
+              inputmode="decimal" autocomplete="off">
           </div>
         </div>
       </div>
@@ -320,7 +360,17 @@ export function abrirFormIngrediente(id = null) {
     _preview();
   });
 
-  [qEl, pEl].forEach(e => e?.addEventListener('input', _preview));
+  // ── Money mask no preço (digita 3550 → mostra 35,50) ──────────
+  pEl?.addEventListener('input', () => {
+    _moneyMask(pEl);
+    _preview();
+  });
+
+  // ── Qty: aceita vírgula como separador decimal ─────────────────
+  qEl?.addEventListener('input', () => {
+    _qtyMask(qEl);
+    _preview();
+  });
 
   // ── Ações ──────────────────────────────────────────────────────
   document.getElementById('_iClose')?.addEventListener('click', () => fecharModal(null), { once: true });
