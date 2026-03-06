@@ -695,3 +695,95 @@ p { line-height:1.55; }
   #ft-nav, #ft-fab, #ft-hdr, #ft-toast, #ft-loading { display:none !important; }
   .ft-section { display:block !important; padding:0 !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   v2.1 — Bloco contextual de unidade (.ft-ctx-card)
+   Exibido dentro do modal de ingrediente, abaixo do select de unidade.
+   Atualiza dinamicamente via JS ao trocar a unidade.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Container do bloco */
+.ft-ctx-card {
+  border-radius: var(--ft-r-sm);
+  background: var(--ft-s3);
+  border: 1px solid var(--ft-border);
+  overflow: hidden;
+  /* Transição suave ao trocar unidade */
+  transition: background .2s;
+  min-height: 30px;
+}
+
+/* Linha de dica: ícone + texto explicativo */
+.ft-ctx-dica {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  font-size: 13px;
+  color: var(--ft-txt2);
+  border-bottom: 1px solid var(--ft-border2);
+}
+.ft-ctx-dica svg {
+  width: 15px; height: 15px;
+  color: var(--ft-acc);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ft-ctx-dica strong { color: var(--ft-txt); }
+
+/* Lista de exemplos: produto → valor */
+.ft-ctx-exs {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+.ft-ctx-ex {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--ft-border2);
+  font-size: 12px;
+}
+.ft-ctx-ex:last-child { border-bottom: none; }
+
+/* Nome do produto (ex: "Farinha 1 kg") */
+.ft-ctx-ex-prod {
+  flex: 1;
+  color: var(--ft-txt2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Seta separadora */
+.ft-ctx-ex-arr {
+  color: var(--ft-txt3);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* Valor que o usuário deve digitar (ex: "1000 g") — destaque */
+.ft-ctx-ex-val {
+  font-weight: 700;
+  color: var(--ft-acc);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+/* ── Tutorial aprimorado v2.1 ─────────────────────────────────────
+   li em itálico = exemplo prático (renderizado com <em> no passo)
+   ────────────────────────────────────────────────────────────────── */
+.ft-tut-list li em {
+  display: block;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--ft-txt3);
+  margin-top: 3px;
+  padding-left: 2px;
+  /* Linha separadora sutil antes do exemplo */
+  border-left: 2px solid var(--ft-acc2);
+  padding-left: 6px;
+}
