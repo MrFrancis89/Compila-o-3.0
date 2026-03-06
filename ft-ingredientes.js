@@ -252,8 +252,8 @@ function _moneyMask(input) {
 }
 
 function _qtyMask(input) {
-  // Permite apenas dígitos + vírgula + ponto (substitui ponto por vírgula)
-  let v = input.value.replace(/[^\d,.]/g, '').replace('.', ',');
+  // Permite apenas dígitos + vírgula + ponto (substitui TODOS os pontos por vírgula)
+  let v = input.value.replace(/[^\d,.]/g, '').replace(/\./g, ',');
   // Permite apenas uma vírgula
   const parts = v.split(',');
   if (parts.length > 2) v = parts[0] + ',' + parts.slice(1).join('');
@@ -458,7 +458,7 @@ async function _save(id) {
     quantidade_embalagem: qtd,
     preco_compra:         preco,
     custo_unitario:       calcCustoUnitario(preco, qtd),
-    criadoEm:             Date.now(),
+    criadoEm:             ing?.criadoEm ?? Date.now(), // preserva data original em edição
   };
 
   const btn = document.getElementById('_iSave');
@@ -664,7 +664,7 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
       // Converte para a unidade base antes de salvar na receita
       const qtdBase = _converter(qtdDigit, unidSel, ing.unidade);
       _close({ ing, qtd: qtdBase });
-    });
+    }, { once: true });
   });
 }
 
