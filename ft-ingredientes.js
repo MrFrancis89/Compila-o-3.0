@@ -152,7 +152,15 @@ function _converter(qtd, de, para) {
 }
 
 // ─── Estado ───────────────────────────────────────────────────────
-export async function initIngredientes() { _ings = await carregar(COL); }
+/** Ordena _ings in-place alfabeticamente pelo nome (pt-BR). */
+function _sortIngs() {
+  _ings.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+export async function initIngredientes() {
+  _ings = await carregar(COL);
+  _sortIngs(); // garante ordem alfabética ao carregar do storage
+}
 export function getIngredientes()        { return _ings; }
 export function getIngredienteById(id)   { return _ings.find(i => i.id === id) || null; }
 
@@ -464,6 +472,7 @@ async function _save(id) {
     } else {
       _ings.push(obj);
     }
+    _sortIngs(); // mantém _ings sempre em ordem alfabética após qualquer alteração
     fecharModal('saved');
     toast(id ? 'Ingrediente atualizado!' : 'Ingrediente adicionado!', 'sucesso');
     renderIngredientes(document.getElementById('ft-busca-ing')?.value || '');
