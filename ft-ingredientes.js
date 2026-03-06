@@ -1,30 +1,137 @@
-// ft-ingredientes.js — v2.0
-// BUG CORRIGIDO: abrirModal() sem await — listeners adicionados imediatamente.
-import { salvar, carregar, remover } from './ft-storage.js';
-import { calcCustoUnitario } from './ft-calc.js';
-import { formatCurrency, formatQtdUnid, generateId, parseNum, UNIDADE_LABEL } from './ft-format.js';
-import { toast, abrirModal, fecharModal, confirmar, renderEmpty, renderTutorial, debounce } from './ft-ui.js';
-import { ico } from './ft-icons.js';
+// ft-ingredientes.js — v2.1
+// ══════════════════════════════════════════════════════════════════
+// CORREÇÃO v2.1 — Formulário completamente reativo à unidade:
+//
+//   PROBLEMA v2.0:
+//   • Placeholder fixo "Ex: 1000" independente da unidade → ao trocar
+//     para kg o usuário via "1000 kg", para L via "1000 L", sem sentido.
+//   • Tip banner estático → mesma mensagem para g, kg, uni, L…
+//   • Label "Qtd. na embalagem" não dizia a unidade.
+//   • Sem exemplo contextual por unidade.
+//
+//   SOLUÇÃO:
+//   • UNI_CFG: mapa por unidade com label, placeholder, dica, exemplo,
+//     prefixo do custo e tipo de grandeza.
+//   • Bloco contextual dinâmico: ao mudar a unidade, atualiza dica +
+//     exemplo + placeholder + label + sufixo da qty em tempo real.
+//   • Preview calculado mostra custo na unidade certa + exemplo prático.
+//   • Tutorial atualizado com instruções por etapa mais claras.
+// ══════════════════════════════════════════════════════════════════
+
+import { salvar, carregar, remover }                           from './ft-storage.js';
+import { calcCustoUnitario }                                   from './ft-calc.js';
+import { formatCurrency, formatQtdUnid, generateId, parseNum,
+         UNIDADE_LABEL }                                       from './ft-format.js';
+import { toast, abrirModal, fecharModal, confirmar,
+         renderEmpty, renderTutorial, debounce }               from './ft-ui.js';
+import { ico }                                                 from './ft-icons.js';
 
 const COL = 'ingredientes';
 let _ings = [];
+
+// ─── Configuração por unidade ──────────────────────────────────────
+// Cada entrada define o comportamento do formulário quando aquela
+// unidade está selecionada. Mantém UX contextual sem código duplicado.
+const UNI_CFG = {
+  g: {
+    grupo:      'peso',
+    label:      'Gramas (g)',
+    qtdLabel:   'Peso da embalagem (em gramas)',
+    placeholder:'1000',
+    sufixo:     'g',
+    dica:       'Informe o peso total da embalagem <strong>em gramas</strong>.',
+    exemplos: [
+      { produto: 'Farinha 1 kg',   valor: '1000 g' },
+      { produto: 'Queijo 500 g',   valor: '500 g'  },
+      { produto: 'Açúcar 5 kg',    valor: '5000 g' },
+    ],
+  },
+  kg: {
+    grupo:      'peso',
+    label:      'Quilogramas (kg)',
+    qtdLabel:   'Peso da embalagem (em kg)',
+    placeholder:'1',
+    sufixo:     'kg',
+    dica:       'Informe o peso total da embalagem <strong>em quilogramas</strong>.',
+    exemplos: [
+      { produto: 'Farinha 1 kg',   valor: '1 kg'   },
+      { produto: 'Carne 5 kg',     valor: '5 kg'   },
+      { produto: 'Sal 500 g',      valor: '0,5 kg' },
+    ],
+  },
+  ml: {
+    grupo:      'volume',
+    label:      'Mililitros (ml)',
+    qtdLabel:   'Volume da embalagem (em ml)',
+    placeholder:'1000',
+    sufixo:     'ml',
+    dica:       'Informe o volume total da embalagem <strong>em mililitros</strong>.',
+    exemplos: [
+      { produto: 'Azeite 1 L',     valor: '1000 ml' },
+      { produto: 'Creme 200 ml',   valor: '200 ml'  },
+      { produto: 'Leite 1 L',      valor: '1000 ml' },
+    ],
+  },
+  l: {
+    grupo:      'volume',
+    label:      'Litros (L)',
+    qtdLabel:   'Volume da embalagem (em litros)',
+    placeholder:'1',
+    sufixo:     'L',
+    dica:       'Informe o volume total da embalagem <strong>em litros</strong>.',
+    exemplos: [
+      { produto: 'Óleo 1 L',       valor: '1 L'    },
+      { produto: 'Galão 5 L',      valor: '5 L'    },
+      { produto: 'Molho 500 ml',   valor: '0,5 L'  },
+    ],
+  },
+  uni: {
+    grupo:      'contagem',
+    label:      'Unidades (uni)',
+    qtdLabel:   'Quantidade na embalagem (uni)',
+    placeholder:'12',
+    sufixo:     'uni',
+    dica:       'Informe <strong>quantas unidades</strong> vêm na embalagem.',
+    exemplos: [
+      { produto: 'Dúzia de ovos',  valor: '12 uni' },
+      { produto: 'Caixa 30 copos',valor: '30 uni'  },
+      { produto: 'Lata avulsa',    valor: '1 uni'  },
+    ],
+  },
+  pct: {
+    grupo:      'contagem',
+    label:      'Pacotes/porções (pct)',
+    qtdLabel:   'Quantidade na embalagem (pct)',
+    placeholder:'1',
+    sufixo:     'pct',
+    dica:       'Informe <strong>quantos pacotes ou porções</strong> vêm na embalagem.',
+    exemplos: [
+      { produto: 'Sachê de fermento', valor: '1 pct' },
+      { produto: 'Caixa 20 sachês',   valor: '20 pct'},
+      { produto: 'Envelope de molho', valor: '1 pct' },
+    ],
+  },
+};
 
 // ─── Estado ───────────────────────────────────────────────────────
 export async function initIngredientes() { _ings = await carregar(COL); }
 export function getIngredientes()        { return _ings; }
 export function getIngredienteById(id)   { return _ings.find(i => i.id === id) || null; }
 
-// ─── Tutorial ─────────────────────────────────────────────────────
+// ─── Tutorial (atualizado v2.1) ────────────────────────────────────
 function _tut() {
   renderTutorial('ft-sec-ing', 'ing', ico.ingredients, 'Cadastro de ingredientes', [
-    'Toque em <strong>+</strong> para adicionar um ingrediente.',
-    'Informe nome, unidade de medida, quantidade da embalagem e preço de compra.',
-    'O <strong>custo unitário</strong> (ex.: R$/g) é calculado automaticamente.',
-    'Toque em qualquer ingrediente para editar ou remover.',
+    'Toque em <strong>+</strong> para cadastrar um ingrediente.',
+    'Escolha a <strong>unidade</strong> (g, kg, ml, L, uni, pct) — o formulário ajusta exemplos e dicas automaticamente.',
+    'Informe a <strong>quantidade da embalagem</strong> conforme a unidade escolhida.<br>'
+    + '<em>Ex: saco 1 kg de farinha → unidade kg, qty 1 · pacote 500 g → unidade g, qty 500.</em>',
+    'O <strong>custo por unidade</strong> é calculado: preço ÷ quantidade.<br>'
+    + '<em>Ex: R$ 12,00 ÷ 1 kg = R$ 12,00/kg.</em>',
+    'Nas receitas, use a mesma unidade. <em>Ex: 0,12 kg de mussarela por pizza.</em>',
   ]);
 }
 
-// ─── Render lista ─────────────────────────────────────────────────
+// ─── Render lista ──────────────────────────────────────────────────
 export function renderIngredientes(busca = '') {
   const wrap = document.getElementById('ft-lista-ing');
   if (!wrap) return;
@@ -45,7 +152,7 @@ export function renderIngredientes(busca = '') {
   }
 
   wrap.innerHTML = `
-    <div class="ft-list-header">${lista.length} ingrediente${lista.length!==1?'s':''}</div>
+    <div class="ft-list-header">${lista.length} ingrediente${lista.length !== 1 ? 's' : ''}</div>
     <div class="ft-list">
       ${lista.map(i => `
       <button class="ft-list-item" data-id="${i.id}" type="button">
@@ -55,7 +162,9 @@ export function renderIngredientes(busca = '') {
           <span class="ft-item-sub">${formatQtdUnid(i.quantidade_embalagem, i.unidade)} · ${formatCurrency(i.preco_compra)}</span>
         </span>
         <span class="ft-item-end">
-          <span class="ft-pill ft-pill-acc">${formatCurrency(i.custo_unitario)}<span class="ft-pill-unit">/${i.unidade}</span></span>
+          <span class="ft-pill ft-pill-acc">
+            ${formatCurrency(i.custo_unitario)}<span class="ft-pill-unit">/${i.unidade}</span>
+          </span>
           <span class="ft-item-chev">${ico.chevR}</span>
         </span>
       </button>`).join('')}
@@ -65,12 +174,16 @@ export function renderIngredientes(busca = '') {
     b.addEventListener('click', () => abrirFormIngrediente(b.dataset.id)));
 }
 
-// ─── Formulário (sem await!) ──────────────────────────────────────
+// ─── Formulário — completamente reativo à unidade ─────────────────
 export function abrirFormIngrediente(id = null) {
   const ing = id ? getIngredienteById(id) : null;
-  const unOpts = ['g','kg','ml','l','uni','pct'].map(u =>
-    `<option value="${u}"${ing?.unidade===u?' selected':''}>${UNIDADE_LABEL[u]}</option>`
-  ).join('');
+  const unAtual = ing?.unidade || 'g';
+
+  // Opções do select com label completo
+  const unOpts = Object.entries(UNI_CFG)
+    .map(([u, c]) =>
+      `<option value="${u}"${unAtual === u ? ' selected' : ''}>${c.label}</option>`)
+    .join('');
 
   const html = `
     <div class="ft-mhd">
@@ -80,75 +193,136 @@ export function abrirFormIngrediente(id = null) {
         ? `<button class="ft-mhd-del" id="_iDel" aria-label="Apagar">${ico.trash}</button>`
         : `<span style="width:32px"></span>`}
     </div>
+
     <div class="ft-mbody">
-      <div class="ft-tip-banner">
-        ${ico.tip}
-        <span>Informe os dados da embalagem como você a compra (ex.: pacote 1 kg = 1000 g, R$ 18,90).</span>
-      </div>
+
+      <!-- 1. Nome -->
       <div class="ft-field">
         <label for="ft-ing-nome">Nome do ingrediente</label>
         <input id="ft-ing-nome" class="ft-input" type="text"
-          placeholder="Ex: Mussarela, Molho de tomate…"
-          value="${_esc(ing?.nome||'')}" autocomplete="off" autocorrect="off">
+          placeholder="Ex: Mussarela, Farinha de trigo, Azeite…"
+          value="${_esc(ing?.nome || '')}"
+          autocomplete="off" autocorrect="off" autocapitalize="words">
       </div>
-      <div class="ft-field-row">
-        <div class="ft-field">
-          <label for="ft-ing-unid">Unidade</label>
-          <select id="ft-ing-unid" class="ft-input ft-select">${unOpts}</select>
-        </div>
-        <div class="ft-field">
-          <label for="ft-ing-qtd">Qtd. na embalagem</label>
-          <input id="ft-ing-qtd" class="ft-input" type="number"
-            placeholder="Ex: 1000" value="${ing?.quantidade_embalagem||''}"
-            min="0.001" step="any" inputmode="decimal">
-        </div>
-      </div>
+
+      <!-- 2. Unidade de medida -->
       <div class="ft-field">
-        <label for="ft-ing-preco">Preço de compra</label>
-        <div class="ft-input-pre-wrap">
-          <span class="ft-input-pre">R$</span>
-          <input id="ft-ing-preco" class="ft-input has-pre" type="number"
-            placeholder="0,00" value="${ing?.preco_compra||''}"
-            min="0" step="0.01" inputmode="decimal">
+        <label for="ft-ing-unid">Unidade de medida</label>
+        <select id="ft-ing-unid" class="ft-input ft-select">${unOpts}</select>
+      </div>
+
+      <!-- 3. Bloco contextual — atualiza ao mudar unidade -->
+      <div class="ft-ctx-card" id="ft-ing-ctx"></div>
+
+      <!-- 4. Qtd embalagem + preço em linha -->
+      <div class="ft-field-row">
+        <div class="ft-field" style="flex:1.2">
+          <label id="ft-ing-qtd-lbl" for="ft-ing-qtd">Qtd. da embalagem</label>
+          <div class="ft-input-suf-wrap">
+            <input id="ft-ing-qtd" class="ft-input has-suf" type="number"
+              placeholder="1000" value="${ing?.quantidade_embalagem || ''}"
+              min="0.001" step="any" inputmode="decimal">
+            <span class="ft-input-suf" id="ft-ing-suf">g</span>
+          </div>
+        </div>
+        <div class="ft-field" style="flex:1">
+          <label for="ft-ing-preco">Preço de compra</label>
+          <div class="ft-input-pre-wrap">
+            <span class="ft-input-pre">R$</span>
+            <input id="ft-ing-preco" class="ft-input has-pre" type="number"
+              placeholder="0,00" value="${ing?.preco_compra || ''}"
+              min="0" step="0.01" inputmode="decimal">
+          </div>
         </div>
       </div>
+
+      <!-- 5. Preview calculado em tempo real -->
       <div class="ft-calc-preview" id="ft-ing-prev">
-        <span class="ft-calc-label">${ico.tag} Custo unitário calculado</span>
+        <span class="ft-calc-label">${ico.tag} Custo por unidade calculado</span>
         <span class="ft-calc-val" id="ft-ing-prev-val">—</span>
       </div>
+
     </div>
+
     <div class="ft-mft">
-      <button class="ft-btn ft-btn-primary ft-btn-full" id="_iSave">
+      <button class="ft-btn ft-btn-primary ft-btn-full" id="_iSave" type="button">
         <span class="ft-bico">${ico.save}</span><span>Salvar ingrediente</span>
       </button>
     </div>`;
 
-  // ── SÍNCRONO: sem await ───────────────────────────────────────
+  // ── SÍNCRONO: sem await ────────────────────────────────────────
   const done = abrirModal(html);
 
-  // Elementos já existem no DOM agora
   const nEl = document.getElementById('ft-ing-nome');
   const uEl = document.getElementById('ft-ing-unid');
   const qEl = document.getElementById('ft-ing-qtd');
   const pEl = document.getElementById('ft-ing-preco');
 
-  function _prev() {
-    const p = parseNum(pEl?.value), q = parseNum(qEl?.value), u = uEl?.value||'g';
+  // ── Renderiza o bloco contextual para a unidade atual ──────────
+  function _atualizarContexto(u) {
+    const cfg = UNI_CFG[u] || UNI_CFG.g;
+
+    // Label + placeholder + sufixo reativos
+    const lblEl = document.getElementById('ft-ing-qtd-lbl');
+    const sufEl = document.getElementById('ft-ing-suf');
+    if (lblEl) lblEl.textContent = cfg.qtdLabel;
+    if (sufEl) sufEl.textContent = cfg.sufixo;
+    if (qEl) {
+      qEl.placeholder = cfg.placeholder;
+      qEl.setAttribute('placeholder', cfg.placeholder);
+    }
+
+    // Bloco contextual com dica + exemplos visuais
+    const ctx = document.getElementById('ft-ing-ctx');
+    if (!ctx) return;
+    ctx.innerHTML = `
+      <div class="ft-ctx-dica">
+        ${ico.info}
+        <span>${cfg.dica}</span>
+      </div>
+      <div class="ft-ctx-exs">
+        ${cfg.exemplos.map(e => `
+        <div class="ft-ctx-ex">
+          <span class="ft-ctx-ex-prod">${e.produto}</span>
+          <span class="ft-ctx-ex-arr">→</span>
+          <span class="ft-ctx-ex-val">${e.valor}</span>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  // ── Preview de custo calculado ─────────────────────────────────
+  function _preview() {
+    const p  = parseNum(pEl?.value);
+    const q  = parseNum(qEl?.value);
+    const u  = uEl?.value || 'g';
     const pv = document.getElementById('ft-ing-prev-val');
     const bx = document.getElementById('ft-ing-prev');
-    if (p>0 && q>0) {
-      const cu = calcCustoUnitario(p,q);
-      if(pv) { pv.textContent = `${formatCurrency(cu)} / ${u}`; pv.classList.add('has'); }
+    if (p > 0 && q > 0) {
+      const cu = calcCustoUnitario(p, q);
+      if (pv) {
+        pv.textContent = `${formatCurrency(cu)} / ${u}`;
+        pv.classList.add('has');
+      }
       bx?.classList.add('active');
     } else {
-      if(pv) { pv.textContent = '—'; pv.classList.remove('has'); }
+      if (pv) { pv.textContent = '—'; pv.classList.remove('has'); }
       bx?.classList.remove('active');
     }
   }
 
-  [pEl, qEl, uEl].forEach(e => e?.addEventListener('input', _prev));
-  _prev();
+  // ── Init: contexto inicial ─────────────────────────────────────
+  _atualizarContexto(unAtual);
+  _preview();
 
+  // ── Unidade muda → atualiza TUDO contextual + preview ─────────
+  uEl?.addEventListener('change', () => {
+    _atualizarContexto(uEl.value);
+    _preview();
+  });
+
+  [qEl, pEl].forEach(e => e?.addEventListener('input', _preview));
+
+  // ── Ações ──────────────────────────────────────────────────────
   document.getElementById('_iClose')?.addEventListener('click', () => fecharModal(null), { once: true });
   document.getElementById('_iSave' )?.addEventListener('click', () => _save(id));
   document.getElementById('_iDel'  )?.addEventListener('click', async () => {
@@ -156,45 +330,64 @@ export function abrirFormIngrediente(id = null) {
     await _del(id);
   });
 
+  // Foco automático no nome (novo ingrediente) ou qty (edição)
+  requestAnimationFrame(() => {
+    if (!ing) nEl?.focus();
+    else      qEl?.focus();
+  });
+
   return done;
 }
 
+// ─── Salvar ────────────────────────────────────────────────────────
 async function _save(id) {
   const nome  = document.getElementById('ft-ing-nome' )?.value.trim();
   const unid  = document.getElementById('ft-ing-unid' )?.value;
   const qtd   = parseNum(document.getElementById('ft-ing-qtd'  )?.value);
   const preco = parseNum(document.getElementById('ft-ing-preco')?.value);
 
-  if (!nome)    { _markErr('ft-ing-nome',  'Informe o nome.'); return; }
-  if (qtd  <=0) { _markErr('ft-ing-qtd',   'Informe a quantidade da embalagem.'); return; }
+  if (!nome)    { _markErr('ft-ing-nome',  'Informe o nome do ingrediente.'); return; }
+  if (qtd  <=0) { _markErr('ft-ing-qtd',   `Informe a quantidade em ${UNI_CFG[unid]?.sufixo || unid}.`); return; }
   if (preco<=0) { _markErr('ft-ing-preco', 'Informe o preço de compra.'); return; }
+
   if (!id) {
-    const dup = _ings.find(i => i.nome.toLowerCase()===nome.toLowerCase());
+    const dup = _ings.find(i => i.nome.toLowerCase() === nome.toLowerCase());
     if (dup) { toast(`"${nome}" já está cadastrado.`, 'aviso'); return; }
   }
 
-  const obj = { id: id||generateId(), nome, unidade: unid,
-    quantidade_embalagem: qtd, preco_compra: preco,
-    custo_unitario: calcCustoUnitario(preco,qtd), criadoEm: Date.now() };
+  const obj = {
+    id: id || generateId(),
+    nome,
+    unidade:              unid,
+    quantidade_embalagem: qtd,
+    preco_compra:         preco,
+    custo_unitario:       calcCustoUnitario(preco, qtd),
+    criadoEm:             Date.now(),
+  };
 
   const btn = document.getElementById('_iSave');
-  if (btn) { btn.disabled=true; btn.lastElementChild.textContent='Salvando…'; }
+  if (btn) { btn.disabled = true; btn.lastElementChild.textContent = 'Salvando…'; }
 
   try {
     await salvar(COL, obj.id, obj);
-    if (id) { const i=_ings.findIndex(x=>x.id===id); if(i>=0) _ings[i]=obj; else _ings.push(obj); }
-    else _ings.push(obj);
+    if (id) {
+      const i = _ings.findIndex(x => x.id === id);
+      if (i >= 0) _ings[i] = obj; else _ings.push(obj);
+    } else {
+      _ings.push(obj);
+    }
     fecharModal('saved');
-    toast(id?'Ingrediente atualizado!':'Ingrediente adicionado!','sucesso');
-    renderIngredientes(document.getElementById('ft-busca-ing')?.value||'');
+    toast(id ? 'Ingrediente atualizado!' : 'Ingrediente adicionado!', 'sucesso');
+    renderIngredientes(document.getElementById('ft-busca-ing')?.value || '');
     document.dispatchEvent(new CustomEvent('ft:ings-changed'));
-  } catch(e) {
-    toast('Erro ao salvar.','erro');
-    if (btn) { btn.disabled=false; btn.lastElementChild.textContent='Salvar ingrediente'; }
+  } catch (e) {
+    toast('Erro ao salvar.', 'erro');
+    if (btn) { btn.disabled = false; btn.lastElementChild.textContent = 'Salvar ingrediente'; }
     console.error(e);
   }
 }
 
+// ─── Deletar ──────────────────────────────────────────────────────
 async function _del(id) {
   const ing = getIngredienteById(id);
   if (!ing) return;
@@ -204,26 +397,20 @@ async function _del(id) {
   );
   if (!ok) return;
   await remover(COL, id);
-  _ings = _ings.filter(i=>i.id!==id);
-  toast('Ingrediente removido.','info');
-  renderIngredientes(document.getElementById('ft-busca-ing')?.value||'');
+  _ings = _ings.filter(i => i.id !== id);
+  toast('Ingrediente removido.', 'info');
+  renderIngredientes(document.getElementById('ft-busca-ing')?.value || '');
   document.dispatchEvent(new CustomEvent('ft:ings-changed'));
 }
 
-function _markErr(id, msg) {
-  const el = document.getElementById(id);
-  if (el) { el.classList.add('err'); el.focus(); el.addEventListener('input',()=>el.classList.remove('err'),{once:true}); }
-  toast(msg,'erro');
-}
-
-// ─── Picker de ingrediente (modal-2, sem sobrescrever receita) ────
+// ─── Picker de ingrediente (modal-2) ──────────────────────────────
 export function abrirPickerIngrediente(jaAdicionados = []) {
   const disp = [..._ings]
     .filter(i => !jaAdicionados.includes(i.id))
-    .sort((a,b) => a.nome.localeCompare(b.nome,'pt-BR'));
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
   if (!disp.length) {
-    toast('Todos os ingredientes já foram adicionados ou não há ingredientes cadastrados.','aviso');
+    toast('Todos os ingredientes já foram adicionados ou nenhum cadastrado.', 'aviso');
     return Promise.resolve(null);
   }
 
@@ -245,13 +432,13 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
         </select>
       </div>
       <div class="ft-field">
-        <label for="ft-pk-qtd">Quantidade por pizza</label>
+        <label for="ft-pk-qtd" id="ft-pk-qtd-lbl">Quantidade por pizza</label>
         <div class="ft-input-suf-wrap">
           <input id="ft-pk-qtd" class="ft-input has-suf" type="number"
-            placeholder="Ex: 120" min="0.001" step="any" inputmode="decimal">
+            placeholder="—" min="0.001" step="any" inputmode="decimal">
           <span class="ft-input-suf" id="ft-pk-unid">—</span>
         </div>
-        <span class="ft-field-hint">Ex: 120 (g), 0.05 (kg), 2 (uni)</span>
+        <span class="ft-field-hint" id="ft-pk-hint">Selecione um ingrediente para ver a unidade.</span>
       </div>
       <div class="ft-calc-preview" id="ft-pk-prev">
         <span class="ft-calc-label">${ico.tag} Custo desta quantidade</span>
@@ -259,16 +446,15 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
       </div>
     </div>
     <div class="ft-mft">
-      <button class="ft-btn ft-btn-ghost" id="_pkCancel">Cancelar</button>
+      <button class="ft-btn ft-btn-ghost"   id="_pkCancel">Cancelar</button>
       <button class="ft-btn ft-btn-primary" id="_pkOk">
         <span class="ft-bico">${ico.plus}</span><span>Adicionar</span>
       </button>
     </div>`;
 
-  // Injetar no modal-2 de forma síncrona
   const ov2 = document.getElementById('ft-modal-2');
   const bx2 = document.getElementById('ft-modal-2-box');
-  if (!ov2||!bx2) return Promise.resolve(null);
+  if (!ov2 || !bx2) return Promise.resolve(null);
   bx2.innerHTML = html;
   ov2.classList.add('open');
   requestAnimationFrame(() => document.getElementById('ft-pk-ing')?.focus());
@@ -276,40 +462,71 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
   const selEl  = document.getElementById('ft-pk-ing');
   const qtdEl  = document.getElementById('ft-pk-qtd');
   const unidEl = document.getElementById('ft-pk-unid');
+  const hintEl = document.getElementById('ft-pk-hint');
   const valEl  = document.getElementById('ft-pk-val');
   const prevBx = document.getElementById('ft-pk-prev');
+  const lblEl  = document.getElementById('ft-pk-qtd-lbl');
 
   function _upd() {
-    const ing = disp.find(i=>i.id===selEl?.value);
-    if (unidEl) unidEl.textContent = ing?.unidade||'—';
+    const ing = disp.find(i => i.id === selEl?.value);
+    const cfg = ing ? (UNI_CFG[ing.unidade] || {}) : null;
+
+    // Atualiza sufixo e placeholder do qty de forma contextual
+    if (unidEl) unidEl.textContent = ing?.unidade || '—';
+    if (qtdEl)  qtdEl.placeholder  = cfg?.placeholder || '—';
+    if (lblEl && cfg)
+      lblEl.textContent = `Quantidade por pizza (${ing.unidade})`;
+    if (hintEl && cfg)
+      hintEl.textContent =
+        `Informe em ${ing.unidade}. ${cfg.exemplos?.[0]
+          ? cfg.exemplos[0].produto + ' = ' + cfg.exemplos[0].valor
+          : ''}`;
+
     const qtd = parseNum(qtdEl?.value);
-    if (ing && qtd>0 && valEl) {
-      valEl.textContent = formatCurrency(qtd*ing.custo_unitario);
-      valEl.classList.add('has'); prevBx?.classList.add('active');
+    if (ing && qtd > 0 && valEl) {
+      valEl.textContent = formatCurrency(qtd * ing.custo_unitario);
+      valEl.classList.add('has');
+      prevBx?.classList.add('active');
     } else if (valEl) {
-      valEl.textContent = '—'; valEl.classList.remove('has'); prevBx?.classList.remove('active');
+      valEl.textContent = '—';
+      valEl.classList.remove('has');
+      prevBx?.classList.remove('active');
     }
   }
+
   selEl?.addEventListener('change', _upd);
-  qtdEl?.addEventListener('input', _upd);
+  qtdEl?.addEventListener('input',  _upd);
 
   return new Promise(resolve => {
-    const _close = (res) => { ov2.classList.remove('open'); resolve(res); };
+    const _close = res => { ov2.classList.remove('open'); resolve(res); };
 
-    document.getElementById('_pkClose' )?.addEventListener('click', ()=>_close(null), {once:true});
-    document.getElementById('_pkCancel')?.addEventListener('click', ()=>_close(null), {once:true});
-    ov2.addEventListener('click', e => { if(e.target===ov2) _close(null); }, {once:true});
+    document.getElementById('_pkClose' )?.addEventListener('click', () => _close(null), { once: true });
+    document.getElementById('_pkCancel')?.addEventListener('click', () => _close(null), { once: true });
+    ov2.addEventListener('click', e => { if (e.target === ov2) _close(null); }, { once: true });
 
     document.getElementById('_pkOk')?.addEventListener('click', () => {
-      const ing = disp.find(i=>i.id===selEl?.value);
+      const ing = disp.find(i => i.id === selEl?.value);
       const qtd = parseNum(qtdEl?.value);
-      if (!ing)    { toast('Selecione um ingrediente.','erro'); return; }
-      if (qtd<=0) { toast('Informe a quantidade.','erro'); return; }
+      if (!ing)   { toast('Selecione um ingrediente.', 'erro');  return; }
+      if (qtd <=0){ toast('Informe a quantidade.', 'erro');       return; }
       _close({ ing, qtd });
     });
   });
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────
+function _markErr(elId, msg) {
+  const el = document.getElementById(elId);
+  if (el) {
+    el.classList.add('err');
+    el.focus();
+    el.addEventListener('input', () => el.classList.remove('err'), { once: true });
+  }
+  toast(msg, 'erro');
+}
+
 function _esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
