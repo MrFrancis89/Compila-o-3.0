@@ -113,6 +113,39 @@ const UNI_CFG = {
   },
 };
 
+// ─── Tabela de conversão entre unidades compatíveis ───────────────
+// _UNID_COMPATIVEIS: dada a unidade-base do ingrediente, quais outras
+//   unidades o usuário pode digitar no picker (com conversão automática).
+// _CONVERTER: converte qtd de `de` para `para` antes de salvar/calcular.
+//   Retorna o valor na unidade-base do ingrediente.
+const _UNID_COMPATIVEIS = {
+  g:   ['g', 'kg'],
+  kg:  ['kg', 'g'],
+  ml:  ['ml', 'l'],
+  l:   ['l', 'ml'],
+  uni: ['uni'],
+  pct: ['pct'],
+};
+
+// Fatores: de unidade → para unidade-base do ingrediente
+const _FATOR_PARA_BASE = {
+  // entrada g, base kg → ÷1000
+  'g->kg':   1 / 1000,
+  // entrada kg, base g → ×1000
+  'kg->g':   1000,
+  // entrada ml, base l → ÷1000
+  'ml->l':   1 / 1000,
+  // entrada l, base ml → ×1000
+  'l->ml':   1000,
+};
+
+/** Converte `qtd` da unidade `de` para a unidade `para`. */
+function _converter(qtd, de, para) {
+  if (de === para) return qtd;
+  const fator = _FATOR_PARA_BASE[`${de}->${para}`];
+  return fator != null ? qtd * fator : qtd; // fallback: sem conversão
+}
+
 // ─── Estado ───────────────────────────────────────────────────────
 export async function initIngredientes() { _ings = await carregar(COL); }
 export function getIngredientes()        { return _ings; }
@@ -481,14 +514,18 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
           <option value="">— Selecione —</option>${opts}
         </select>
       </div>
-      <div class="ft-field">
+      <div class="ft-field" id="ft-pk-qtd-field" style="display:none">
         <label for="ft-pk-qtd" id="ft-pk-qtd-lbl">Quantidade por pizza</label>
         <div class="ft-input-suf-wrap">
-          <input id="ft-pk-qtd" class="ft-input has-suf" type="number"
-            placeholder="—" min="0.001" step="any" inputmode="decimal">
-          <span class="ft-input-suf" id="ft-pk-unid">—</span>
+          <input id="ft-pk-qtd" class="ft-input has-suf" type="text"
+            placeholder="—" inputmode="decimal" autocomplete="off">
+          <!-- SELECT de unidades compatíveis -->
+          <select id="ft-pk-unid" class="ft-input-suf ft-suf-select"
+            style="min-width:52px;border-left:1px solid rgba(255,255,255,0.12);
+                   background:transparent;color:inherit;font-size:inherit;
+                   padding:0 6px;cursor:pointer;border-radius:0 10px 10px 0"></select>
         </div>
-        <span class="ft-field-hint" id="ft-pk-hint">Selecione um ingrediente para ver a unidade.</span>
+        <span class="ft-field-hint" id="ft-pk-hint"></span>
       </div>
       <div class="ft-calc-preview" id="ft-pk-prev">
         <span class="ft-calc-label">${ico.tag} Custo desta quantidade</span>
@@ -509,43 +546,86 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
   ov2.classList.add('open');
   requestAnimationFrame(() => document.getElementById('ft-pk-ing')?.focus());
 
-  const selEl  = document.getElementById('ft-pk-ing');
-  const qtdEl  = document.getElementById('ft-pk-qtd');
-  const unidEl = document.getElementById('ft-pk-unid');
-  const hintEl = document.getElementById('ft-pk-hint');
-  const valEl  = document.getElementById('ft-pk-val');
-  const prevBx = document.getElementById('ft-pk-prev');
-  const lblEl  = document.getElementById('ft-pk-qtd-lbl');
+  const selEl    = document.getElementById('ft-pk-ing');
+  const qtdEl    = document.getElementById('ft-pk-qtd');
+  const unidEl   = document.getElementById('ft-pk-unid');
+  const hintEl   = document.getElementById('ft-pk-hint');
+  const valEl    = document.getElementById('ft-pk-val');
+  const prevBx   = document.getElementById('ft-pk-prev');
+  const lblEl    = document.getElementById('ft-pk-qtd-lbl');
+  const qtdField = document.getElementById('ft-pk-qtd-field');
 
+  // ── Popula select de unidades compatíveis com a unidade do ingrediente
+  function _popularUnidades(unidadeBase) {
+    if (!unidEl) return;
+    const compativeis = _UNID_COMPATIVEIS[unidadeBase] || [unidadeBase];
+    unidEl.innerHTML = compativeis
+      .map(u => `<option value="${u}"${u === unidadeBase ? ' selected' : ''}>${u}</option>`)
+      .join('');
+  }
+
+  // ── Atualiza preview de custo ─────────────────────────────────
   function _upd() {
     const ing = disp.find(i => i.id === selEl?.value);
-    const cfg = ing ? (UNI_CFG[ing.unidade] || {}) : null;
 
-    // Atualiza sufixo e placeholder do qty de forma contextual
-    if (unidEl) unidEl.textContent = ing?.unidade || '—';
-    if (qtdEl)  qtdEl.placeholder  = cfg?.placeholder || '—';
-    if (lblEl && cfg)
-      lblEl.textContent = `Quantidade por pizza (${ing.unidade})`;
-    if (hintEl && cfg)
-      hintEl.textContent =
-        `Informe em ${ing.unidade}. ${cfg.exemplos?.[0]
-          ? cfg.exemplos[0].produto + ' = ' + cfg.exemplos[0].valor
-          : ''}`;
+    // Mostra/oculta campo qty
+    if (qtdField) qtdField.style.display = ing ? '' : 'none';
 
-    const qtd = parseNum(qtdEl?.value);
-    if (ing && qtd > 0 && valEl) {
-      valEl.textContent = formatCurrency(qtd * ing.custo_unitario);
-      valEl.classList.add('has');
+    if (!ing) {
+      if (valEl) { valEl.textContent = '—'; valEl.classList.remove('has'); }
+      prevBx?.classList.remove('active');
+      return;
+    }
+
+    // Unidade selecionada no picker (pode diferir da base do ingrediente)
+    const unidSel = unidEl?.value || ing.unidade;
+
+    // Atualiza label e dica contextual
+    if (lblEl)
+      lblEl.textContent = `Quantidade por pizza`;
+    if (hintEl) {
+      const cfg = UNI_CFG[ing.unidade];
+      const ex  = cfg?.exemplos?.[0];
+      const convMsg = unidSel !== ing.unidade
+        ? ` · convertido para ${ing.unidade} automaticamente`
+        : '';
+      hintEl.textContent = ex
+        ? `Ex: ${ex.produto} = ${ex.valor}${convMsg}`
+        : `Informe em ${unidSel}${convMsg}`;
+    }
+
+    // Calcula custo com conversão de unidade se necessário
+    const qtdDigitada = parseNum(qtdEl?.value);
+    if (qtdDigitada > 0) {
+      // Converte para a unidade base do ingrediente antes de calcular
+      const qtdBase = _converter(qtdDigitada, unidSel, ing.unidade);
+      const custo   = qtdBase * ing.custo_unitario;
+      if (valEl) {
+        valEl.textContent = formatCurrency(custo);
+        valEl.classList.add('has');
+      }
       prevBx?.classList.add('active');
-    } else if (valEl) {
-      valEl.textContent = '—';
-      valEl.classList.remove('has');
+    } else {
+      if (valEl) { valEl.textContent = '—'; valEl.classList.remove('has'); }
       prevBx?.classList.remove('active');
     }
   }
 
-  selEl?.addEventListener('change', _upd);
-  qtdEl?.addEventListener('input',  _upd);
+  // ── Quando ingrediente muda: repopula unidades + reseta qty ──
+  selEl?.addEventListener('change', () => {
+    const ing = disp.find(i => i.id === selEl.value);
+    if (ing) {
+      _popularUnidades(ing.unidade);
+      if (qtdEl) { qtdEl.value = ''; qtdEl.placeholder = UNI_CFG[ing.unidade]?.placeholder || '—'; }
+    }
+    _upd();
+  });
+
+  // ── Máscara qty + preview ao digitar ─────────────────────────
+  qtdEl?.addEventListener('input', () => { _qtyMask(qtdEl); _upd(); });
+
+  // ── Mudança de unidade → recalcula preview ────────────────────
+  unidEl?.addEventListener('change', _upd);
 
   return new Promise(resolve => {
     const _close = res => { ov2.classList.remove('open'); resolve(res); };
@@ -555,11 +635,16 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
     ov2.addEventListener('click', e => { if (e.target === ov2) _close(null); }, { once: true });
 
     document.getElementById('_pkOk')?.addEventListener('click', () => {
-      const ing = disp.find(i => i.id === selEl?.value);
-      const qtd = parseNum(qtdEl?.value);
-      if (!ing)   { toast('Selecione um ingrediente.', 'erro');  return; }
-      if (qtd <=0){ toast('Informe a quantidade.', 'erro');       return; }
-      _close({ ing, qtd });
+      const ing      = disp.find(i => i.id === selEl?.value);
+      const qtdDigit = parseNum(qtdEl?.value);
+      const unidSel  = unidEl?.value || ing?.unidade;
+
+      if (!ing)        { toast('Selecione um ingrediente.', 'erro'); return; }
+      if (qtdDigit<=0) { toast('Informe a quantidade.', 'erro');     return; }
+
+      // Converte para a unidade base antes de salvar na receita
+      const qtdBase = _converter(qtdDigit, unidSel, ing.unidade);
+      _close({ ing, qtd: qtdBase });
     });
   });
 }
