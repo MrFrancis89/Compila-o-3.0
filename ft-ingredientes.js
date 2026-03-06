@@ -113,37 +113,42 @@ const UNI_CFG = {
   },
 };
 
-// ─── Tabela de conversão entre unidades compatíveis ───────────────
-// _UNID_COMPATIVEIS: dada a unidade-base do ingrediente, quais outras
-//   unidades o usuário pode digitar no picker (com conversão automática).
-// _CONVERTER: converte qtd de `de` para `para` antes de salvar/calcular.
-//   Retorna o valor na unidade-base do ingrediente.
-const _UNID_COMPATIVEIS = {
-  g:   ['g', 'kg'],
-  kg:  ['kg', 'g'],
-  ml:  ['ml', 'l'],
-  l:   ['l', 'ml'],
-  uni: ['uni'],
-  pct: ['pct'],
+// ─── Tabela de conversão entre unidades ──────────────────────────
+// Todas as 6 unidades são sempre exibidas no picker.
+// Pares COMPATÍVEIS: conversão automática + custo correto.
+// Pares INCOMPATÍVEIS: salva na unidade digitada sem conversão
+//   (ex.: o usuário escolheu "uni" para um ingrediente em kg porque
+//    quer registrar por peça — o custo fica estimado).
+//
+// Grupos compatíveis:
+//   peso:   g ↔ kg
+//   volume: ml ↔ L
+//   contagem: uni, pct (sem conversão entre si)
+
+const _TODAS_UNIDADES = ['g', 'kg', 'ml', 'l', 'uni', 'pct'];
+
+// Fatores de conversão entre pares compatíveis
+const _FATOR = {
+  'g->kg':  1 / 1000,
+  'kg->g':  1000,
+  'ml->l':  1 / 1000,
+  'l->ml':  1000,
 };
 
-// Fatores: de unidade → para unidade-base do ingrediente
-const _FATOR_PARA_BASE = {
-  // entrada g, base kg → ÷1000
-  'g->kg':   1 / 1000,
-  // entrada kg, base g → ×1000
-  'kg->g':   1000,
-  // entrada ml, base l → ÷1000
-  'ml->l':   1 / 1000,
-  // entrada l, base ml → ×1000
-  'l->ml':   1000,
-};
+// Retorna true se `de` e `para` têm conversão definida
+function _ehCompativel(de, para) {
+  return de === para || (`${de}->${para}` in _FATOR);
+}
 
-/** Converte `qtd` da unidade `de` para a unidade `para`. */
+/**
+ * Converte `qtd` da unidade `de` para a unidade `para`.
+ * Se incompatível, retorna a qtd sem conversão (1:1) — o custo
+ * ficará estimado e uma dica aparece na UI.
+ */
 function _converter(qtd, de, para) {
   if (de === para) return qtd;
-  const fator = _FATOR_PARA_BASE[`${de}->${para}`];
-  return fator != null ? qtd * fator : qtd; // fallback: sem conversão
+  const fator = _FATOR[`${de}->${para}`];
+  return fator != null ? qtd * fator : qtd;
 }
 
 // ─── Estado ───────────────────────────────────────────────────────
@@ -555,11 +560,10 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
   const lblEl    = document.getElementById('ft-pk-qtd-lbl');
   const qtdField = document.getElementById('ft-pk-qtd-field');
 
-  // ── Popula select de unidades compatíveis com a unidade do ingrediente
+  // ── Popula select com TODAS as unidades; pré-seleciona a do ingrediente
   function _popularUnidades(unidadeBase) {
     if (!unidEl) return;
-    const compativeis = _UNID_COMPATIVEIS[unidadeBase] || [unidadeBase];
-    unidEl.innerHTML = compativeis
+    unidEl.innerHTML = _TODAS_UNIDADES
       .map(u => `<option value="${u}"${u === unidadeBase ? ' selected' : ''}>${u}</option>`)
       .join('');
   }
@@ -579,25 +583,31 @@ export function abrirPickerIngrediente(jaAdicionados = []) {
 
     // Unidade selecionada no picker (pode diferir da base do ingrediente)
     const unidSel = unidEl?.value || ing.unidade;
+    const compativel = _ehCompativel(unidSel, ing.unidade);
 
     // Atualiza label e dica contextual
-    if (lblEl)
-      lblEl.textContent = `Quantidade por pizza`;
+    if (lblEl) lblEl.textContent = `Quantidade por pizza`;
     if (hintEl) {
-      const cfg = UNI_CFG[ing.unidade];
-      const ex  = cfg?.exemplos?.[0];
-      const convMsg = unidSel !== ing.unidade
-        ? ` · convertido para ${ing.unidade} automaticamente`
-        : '';
-      hintEl.textContent = ex
-        ? `Ex: ${ex.produto} = ${ex.valor}${convMsg}`
-        : `Informe em ${unidSel}${convMsg}`;
+      if (unidSel === ing.unidade) {
+        // Mesma unidade — exemplo simples
+        const cfg = UNI_CFG[ing.unidade];
+        const ex  = cfg?.exemplos?.[0];
+        hintEl.textContent = ex ? `Ex: ${ex.produto} = ${ex.valor}` : `Informe em ${unidSel}`;
+        hintEl.style.color = '';
+      } else if (compativel) {
+        // Unidade diferente mas conversão automática disponível
+        hintEl.textContent = `↺ Convertido para ${ing.unidade} automaticamente`;
+        hintEl.style.color = 'var(--accent, #FF8C00)';
+      } else {
+        // Sem conversão — custo estimado
+        hintEl.textContent = `⚠️ Sem conversão ${unidSel}→${ing.unidade}. Custo estimado.`;
+        hintEl.style.color = 'var(--warn, #f59e0b)';
+      }
     }
 
-    // Calcula custo com conversão de unidade se necessário
+    // Calcula custo com conversão quando compatível
     const qtdDigitada = parseNum(qtdEl?.value);
     if (qtdDigitada > 0) {
-      // Converte para a unidade base do ingrediente antes de calcular
       const qtdBase = _converter(qtdDigitada, unidSel, ing.unidade);
       const custo   = qtdBase * ing.custo_unitario;
       if (valEl) {
