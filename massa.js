@@ -83,6 +83,20 @@ function esc(s) {
 
 function arredondar(n, c = 2) { return parseFloat(n.toFixed(c)); }
 
+// ── Custos (lê producao_custos_v1 sem gravar) ─────────────────────
+function carregarCustosProducao() {
+    try {
+        const raw = localStorage.getItem('producao_custos_v1');
+        if (!raw) return null;
+        const c = JSON.parse(raw);
+        const k = parseFloat(c.custoKgTrigo) || 0;
+        const o = parseFloat(c.overheadPct)  || 0;
+        const m = parseFloat(c.maoDeObra)    || 0;
+        if (k === 0 && m === 0) return null;   // nada configurado
+        return { custoKgTrigo: k, overheadPct: o, maoDeObra: m };
+    } catch (e) { return null; }
+}
+
 // Modal de entrada de texto (nome de receita, renomear)
 function pedirTexto({ titulo, placeholder, valorInicial = '', extra = '', onOk }) {
     darFeedback();
@@ -270,7 +284,10 @@ export function iniciarMassa() {
             ${buildResultGrid(r, k)}
         </div>
 
-        <!-- ⑥ PAINEL DE EDIÇÃO DOS INGREDIENTES -->
+        <!-- ⑥ FICHA TÉCNICA DE CUSTO -->
+        ${buildFichaTecnica(r, k)}
+
+        <!-- ⑦ PAINEL DE EDIÇÃO DOS INGREDIENTES -->
         <div class="card massa-edit-panel">
             <div class="massa-edit-header">
                 <span class="massa-edit-title">
@@ -287,11 +304,89 @@ export function iniciarMassa() {
             </button>
         </div>
 
-        <!-- ⑦ AÇÃO COPIAR -->
+        <!-- ⑧ AÇÃO COPIAR -->
         <div class="massa-actions">
             <button id="massa-btnCopy" class="massa-action-btn btn-zap">
                 ${SVG_COPY} Copiar Receita
             </button>
+        </div>`;
+    }
+
+    // ── Ficha Técnica de Custo ────────────────────────────────────
+    function buildFichaTecnica(r, k) {
+        const custos   = carregarCustosProducao();
+        const pesoBola = r.pesoBola > 0 ? r.pesoBola : 250;
+
+        const fmtR = v => 'R$\u00a0' + v.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+        });
+
+        // Calcula valores iniciais (pode ser zero se k=0)
+        let custoIngr = 0, custoOverh = 0, custoTotal = 0, bolas = 0, porBola = 0;
+        if (custos && k > 0) {
+            const somaIngr = r.ingredientes.reduce((s, i) => s + (parseFloat(i.valor) || 0), 0);
+            const massaG   = k * (1000 + somaIngr);
+            bolas          = pesoBola > 0 ? Math.floor(massaG / pesoBola) : 0;
+            custoIngr      = custos.custoKgTrigo * k;
+            custoOverh     = custoIngr * (custos.overheadPct / 100);
+            custoTotal     = custoIngr + custoOverh + custos.maoDeObra;
+            porBola        = bolas > 0 ? custoTotal / bolas : 0;
+        }
+
+        return `
+        <div class="card massa-ficha-card">
+            <div class="massa-ficha-header">
+                ${SVG_COIN}
+                <span class="massa-ficha-titulo">Ficha Técnica de Custo</span>
+            </div>
+
+            <div class="massa-ficha-pesoBola-row">
+                <label class="massa-ficha-label" for="massa-pesoBola">Peso por bola</label>
+                <div class="massa-ficha-pesoBola-wrap">
+                    <input type="number" id="massa-pesoBola" class="massa-ficha-pesoBola-input"
+                           value="${pesoBola}" min="1" step="5" inputmode="numeric"
+                           aria-label="Peso por bola em gramas">
+                    <span class="massa-ficha-suf">g</span>
+                </div>
+            </div>
+
+            ${!custos ? `
+            <p class="massa-ficha-nudge">
+                Configure os custos na aba <strong>Produção</strong> para ver o custo por bola aqui.
+            </p>` : `
+            <div class="massa-ficha-breakdown">
+                ${custos.custoKgTrigo > 0 ? `
+                <div class="massa-ficha-linha">
+                    <span class="massa-ficha-linha-label">Ingredientes</span>
+                    <span class="massa-ficha-linha-valor" data-custo="ingr">${k > 0 ? fmtR(custoIngr) : '—'}</span>
+                </div>` : ''}
+                ${custos.overheadPct > 0 ? `
+                <div class="massa-ficha-linha">
+                    <span class="massa-ficha-linha-label">+ Overhead (${custos.overheadPct}%)</span>
+                    <span class="massa-ficha-linha-valor" data-custo="overh">${k > 0 ? fmtR(custoOverh) : '—'}</span>
+                </div>` : ''}
+                ${custos.maoDeObra > 0 ? `
+                <div class="massa-ficha-linha">
+                    <span class="massa-ficha-linha-label">+ Mão de obra</span>
+                    <span class="massa-ficha-linha-valor" data-custo="mdo">${fmtR(custos.maoDeObra)}</span>
+                </div>` : ''}
+            </div>
+
+            <div class="massa-ficha-divisor"></div>
+
+            <div class="massa-ficha-total-row">
+                <span class="massa-ficha-total-label">Custo total</span>
+                <span class="massa-ficha-total-valor" data-custo="total">${k > 0 ? fmtR(custoTotal) : '—'}</span>
+            </div>
+
+            <div class="massa-ficha-porbola-wrap">
+                <div class="massa-ficha-porbola-left">
+                    <span class="massa-ficha-porbola-label">Custo por bola</span>
+                    <span class="massa-ficha-porbola-bolas" data-custo="bolas">${k > 0 && bolas > 0 ? bolas + '\u00a0bolas' : ''}</span>
+                </div>
+                <span class="massa-ficha-porbola-valor" data-custo="porbola">${k > 0 && porBola > 0 ? fmtR(porBola) : '—'}</span>
+            </div>
+            `}
         </div>`;
     }
 
@@ -334,6 +429,44 @@ export function iniciarMassa() {
             const el = document.querySelector(`[data-ingr-res="${ing.id}"]`);
             if (el) el.textContent = arredondar(k * ing.valor);
         });
+        recalcularCusto();
+    }
+
+    function recalcularCusto() {
+        const custos = carregarCustosProducao();
+        if (!custos) return;
+
+        const r  = rec();
+        const k  = kg();
+        const pb = parseFloat(document.getElementById('massa-pesoBola')?.value) || (r.pesoBola > 0 ? r.pesoBola : 250);
+
+        const fmtR = v => 'R$\u00a0' + v.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+        });
+        const upd = (attr, txt) => {
+            const el = document.querySelector(`[data-custo="${attr}"]`);
+            if (el) el.textContent = txt;
+        };
+
+        if (k <= 0) {
+            upd('ingr', '—'); upd('overh', '—');
+            upd('total', '—'); upd('porbola', '—'); upd('bolas', '');
+            return;
+        }
+
+        const somaIngr  = r.ingredientes.reduce((s, i) => s + (parseFloat(i.valor) || 0), 0);
+        const massaG    = k * (1000 + somaIngr);
+        const bolas     = pb > 0 ? Math.floor(massaG / pb) : 0;
+        const custoIngr = custos.custoKgTrigo * k;
+        const custoOverh= custoIngr * (custos.overheadPct / 100);
+        const custoTotal= custoIngr + custoOverh + custos.maoDeObra;
+        const porBola   = bolas > 0 ? custoTotal / bolas : 0;
+
+        if (custos.custoKgTrigo > 0) upd('ingr',  fmtR(custoIngr));
+        if (custos.overheadPct  > 0) upd('overh', fmtR(custoOverh));
+        upd('total',   fmtR(custoTotal));
+        upd('porbola', porBola > 0 ? fmtR(porBola) : '—');
+        upd('bolas',   bolas   > 0 ? bolas + '\u00a0bolas' : '');
     }
 
     // ── Eventos ───────────────────────────────────────────────────
@@ -341,6 +474,14 @@ export function iniciarMassa() {
         const r = rec();
 
         document.getElementById('massa-trigoInput')?.addEventListener('input', recalcular);
+
+        // Peso por bola — salva na receita e recalcula custo ao vivo
+        document.getElementById('massa-pesoBola')?.addEventListener('input', () => {
+            const pb = parseFloat(document.getElementById('massa-pesoBola').value) || 0;
+            rec().pesoBola = pb > 0 ? pb : 0;
+            save();
+            recalcularCusto();
+        });
 
         // Troca de aba
         document.querySelectorAll('.massa-tab-btn').forEach(btn => {
@@ -478,3 +619,4 @@ const SVG_GRAIN = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 const SVG_SETTINGS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`;
 const SVG_COPY  = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
 const SVG_CLOSE = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+const SVG_COIN  = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 6v2m0 8v2M9.5 9.5C9.5 8.1 10.6 7 12 7s2.5 1.1 2.5 2.5c0 2.5-5 2.5-5 5C9.5 15.9 10.6 17 12 17s2.5-1.1 2.5-2.5"/></svg>`;
