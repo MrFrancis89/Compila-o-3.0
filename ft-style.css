@@ -787,3 +787,54 @@ p { line-height:1.55; }
   border-left: 2px solid var(--ft-acc2);
   padding-left: 6px;
 }
+
+/* ── ft-custos.js v3.0 — Overhead + Mão de obra ──────────────────── */
+.ft-overhead-row {
+  padding: 4px 14px 0;
+}
+.ft-overhead-lbl {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ft-txt1);
+}
+.ft-overhead-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ft-txt3);
+}
+
+/* Custo breakdown */
+.ft-custo-breakdown {
+  margin: 4px 14px 14px;
+  background: var(--ft-surface2, rgba(255,255,255,0.05));
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--ft-border, rgba(255,255,255,0.08));
+}
+.ft-cb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--ft-border, rgba(255,255,255,0.06));
+}
+.ft-cb-row:last-child { border-bottom: none; }
+.ft-cb-lbl { color: var(--ft-txt2); }
+.ft-cb-val { font-weight: 600; color: var(--ft-txt1); font-size: 13px; }
+.ft-cb-extra .ft-cb-lbl { color: var(--ft-txt3); font-size: 12px; }
+.ft-cb-extra .ft-cb-val { color: var(--ft-txt3); font-size: 12px; }
+.ft-cb-total {
+  background: var(--ft-surface3, rgba(255,140,0,0.08));
+  padding: 11px 14px;
+}
+.ft-cb-total .ft-cb-lbl { color: var(--ft-txt1); font-weight: 600; }
+.ft-cb-val-total {
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  color: var(--ft-acc) !important;
+}
