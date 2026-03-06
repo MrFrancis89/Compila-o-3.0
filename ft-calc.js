@@ -76,3 +76,28 @@ export function calcRendimento(qtdEmbalagem, qtdPorPizza) {
     if (!qtdPorPizza || qtdPorPizza <= 0) return 0;
     return qtdEmbalagem / qtdPorPizza;
 }
+
+/**
+ * Custo total incorporando overhead e mão de obra como percentual
+ * sobre o custo dos ingredientes.
+ *
+ * Fórmula:
+ *   custoTotal = custoIng × (1 + overhead/100 + maoDeObra/100)
+ *
+ * Exemplos:
+ *   custoIng=10, overhead=15%, maoDeObra=20% → 10 × 1.35 = R$13,50
+ *   custoIng=10, overhead=0%,  maoDeObra=0%  → 10 × 1.00 = R$10,00
+ *
+ * @param {number} custoIng      Custo dos ingredientes
+ * @param {number} overheadPct   % overhead (gás, energia, embalagem, etc.)
+ * @param {number} maoDeObraPct  % mão de obra
+ * @returns {{ total: number, valorOverhead: number, valorMaoDeObra: number }}
+ */
+export function calcCustoComExtras(custoIng, overheadPct, maoDeObraPct) {
+    const oh  = Math.max(0, overheadPct   || 0);
+    const mob = Math.max(0, maoDeObraPct  || 0);
+    const valorOverhead   = custoIng * oh  / 100;
+    const valorMaoDeObra  = custoIng * mob / 100;
+    const total           = custoIng + valorOverhead + valorMaoDeObra;
+    return { total, valorOverhead, valorMaoDeObra };
+}
